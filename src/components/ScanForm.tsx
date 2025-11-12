@@ -12,6 +12,7 @@ interface ScanFormProps {
 const ScanForm = ({ onStartScan, isScanning }: ScanFormProps) => {
   const [domain, setDomain] = useState("");
   const [selectedScan, setSelectedScan] = useState("quick");
+  const [domainError, setDomainError] = useState("");
 
   const scanTypes = [
     {
@@ -37,9 +38,38 @@ const ScanForm = ({ onStartScan, isScanning }: ScanFormProps) => {
     },
   ];
 
+  const validateDomain = (value: string): boolean => {
+    if (!value.trim()) {
+      setDomainError("");
+      return false;
+    }
+
+    // Check if it's a valid domain or URL format
+    const domainRegex = /^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/;
+    const urlRegex = /^(?:https?:\/\/)?(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(?:\/.*)?$/;
+    
+    if (!domainRegex.test(value) && !urlRegex.test(value)) {
+      setDomainError("Input a valid url");
+      return false;
+    }
+    
+    setDomainError("");
+    return true;
+  };
+
+  const handleDomainChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setDomain(value);
+    if (value.trim()) {
+      validateDomain(value);
+    } else {
+      setDomainError("");
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (domain.trim()) {
+    if (domain.trim() && validateDomain(domain.trim())) {
       onStartScan(domain.trim(), selectedScan);
     }
   };
@@ -66,10 +96,15 @@ const ScanForm = ({ onStartScan, isScanning }: ScanFormProps) => {
               type="text"
               placeholder="example.com"
               value={domain}
-              onChange={(e) => setDomain(e.target.value)}
-              className="bg-input border-primary/30 text-foreground placeholder:text-muted-foreground font-mono"
+              onChange={handleDomainChange}
+              className={`bg-input border-primary/30 text-foreground placeholder:text-muted-foreground font-mono ${
+                domainError ? "border-destructive" : ""
+              }`}
               disabled={isScanning}
             />
+            {domainError && (
+              <p className="text-sm text-destructive font-medium">{domainError}</p>
+            )}
           </div>
 
           <div className="space-y-3">
@@ -113,7 +148,7 @@ const ScanForm = ({ onStartScan, isScanning }: ScanFormProps) => {
 
           <Button
             type="submit"
-            disabled={!domain.trim() || isScanning}
+            disabled={!domain.trim() || isScanning || !!domainError}
             className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold py-6 text-lg shadow-[0_0_20px_rgba(34,197,94,0.4)] hover:shadow-[0_0_30px_rgba(34,197,94,0.6)] transition-all"
           >
             {isScanning ? "Scanning..." : "Start Security Scan"}
