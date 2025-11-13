@@ -5,13 +5,110 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Helper to extract domain from URL
+function extractDomain(input: string): string {
+  try {
+    const url = new URL(input.startsWith('http') ? input : `https://${input}`);
+    return url.hostname;
+  } catch {
+    return input.replace(/^(https?:\/\/)?(www\.)?/, '').split('/')[0];
+  }
+}
+
+// Real DNS lookup using Google DNS-over-HTTPS
+async function checkSubdomain(subdomain: string): Promise<boolean> {
+  try {
+    const response = await fetch(
+      `https://dns.google/resolve?name=${subdomain}&type=A`,
+      { signal: AbortSignal.timeout(3000) }
+    );
+    const data = await response.json();
+    return data.Status === 0 && data.Answer && data.Answer.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+// Real SSL/TLS and security headers check
+async function checkWebSecurity(domain: string) {
+  const results = {
+    httpAccessible: false,
+    httpsAccessible: false,
+    redirectsToHttps: false,
+    securityHeaders: {} as Record<string, string | boolean>,
+    certificate: {
+      valid: false,
+      issuer: '',
+      expiryDays: 0
+    }
+  };
+
+  try {
+    // Check HTTP
+    const httpResponse = await fetch(`http://${domain}`, {
+      method: 'HEAD',
+      redirect: 'manual',
+      signal: AbortSignal.timeout(5000)
+    });
+    results.httpAccessible = true;
+    results.redirectsToHttps = httpResponse.status >= 300 && httpResponse.status < 400 && 
+      httpResponse.headers.get('location')?.startsWith('https://') || false;
+  } catch {
+    results.httpAccessible = false;
+  }
+
+  try {
+    // Check HTTPS and security headers
+    const httpsResponse = await fetch(`https://${domain}`, {
+      method: 'HEAD',
+      signal: AbortSignal.timeout(5000)
+    });
+    results.httpsAccessible = httpsResponse.ok;
+    results.certificate.valid = true;
+
+    // Check security headers
+    results.securityHeaders = {
+      'Strict-Transport-Security': httpsResponse.headers.get('strict-transport-security') || 'Not set',
+      'X-Frame-Options': httpsResponse.headers.get('x-frame-options') || 'Not set',
+      'X-Content-Type-Options': httpsResponse.headers.get('x-content-type-options') || 'Not set',
+      'Content-Security-Policy': httpsResponse.headers.get('content-security-policy') ? 'Present' : 'Not set',
+      'X-XSS-Protection': httpsResponse.headers.get('x-xss-protection') || 'Not set',
+      'Referrer-Policy': httpsResponse.headers.get('referrer-policy') || 'Not set',
+    };
+  } catch {
+    results.httpsAccessible = false;
+    results.certificate.valid = false;
+  }
+
+  return results;
+}
+
+// Get IP address info
+async function getIPInfo(domain: string) {
+  try {
+    const response = await fetch(
+      `https://dns.google/resolve?name=${domain}&type=A`,
+      { signal: AbortSignal.timeout(3000) }
+    );
+    const data = await response.json();
+    
+    if (data.Answer && data.Answer.length > 0) {
+      return data.Answer.map((record: any) => record.data);
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { domain, scanType } = await req.json();
+    const { domain: rawDomain, scanType } = await req.json();
+    const domain = extractDomain(rawDomain);
     console.log(`Starting ${scanType} scan for domain: ${domain}`);
 
     if (!domain) {
@@ -29,125 +126,152 @@ serve(async (req) => {
           controller.enqueue(encoder.encode(`data: ${data}\n\n`));
         };
 
-        // Initial scan start
-        sendUpdate(`Initializing ${scanType} scan for ${domain}...`, 'info');
-        await new Promise(resolve => setTimeout(resolve, 500));
+        try {
+          sendUpdate(`Initializing real security scan for ${domain}...`, 'info');
+          await new Promise(resolve => setTimeout(resolve, 500));
 
-        // Subdomain Enumeration
-        sendUpdate('Starting subdomain enumeration...', 'header');
-        await new Promise(resolve => setTimeout(resolve, 300));
-        
-        const subdomains = [
-          'www', 'mail', 'ftp', 'admin', 'api', 'dev', 'staging', 
-          'test', 'portal', 'blog', 'shop', 'dashboard', 'app'
-        ];
-        
-        const foundSubdomains: string[] = [];
-        const scanSpeed = scanType === 'quick' ? 100 : scanType === 'detailed' ? 200 : 300;
-        
-        for (const sub of subdomains.slice(0, scanType === 'quick' ? 5 : scanType === 'detailed' ? 10 : 13)) {
-          await new Promise(resolve => setTimeout(resolve, scanSpeed));
-          const found = Math.random() > 0.6;
-          if (found) {
-            foundSubdomains.push(`${sub}.${domain}`);
-            sendUpdate(`✓ Found: ${sub}.${domain}`, 'success');
-          } else {
-            sendUpdate(`✗ Checking: ${sub}.${domain}`, 'scan');
-          }
-        }
-
-        sendUpdate(`Subdomain enumeration complete. Found ${foundSubdomains.length} subdomains.`, 'success');
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        // Network Scanning
-        sendUpdate('Starting network scanning...', 'header');
-        await new Promise(resolve => setTimeout(resolve, 300));
-        
-        const networkInfo = [
-          { type: 'IPv4 Address', value: `${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}` },
-          { type: 'IPv6 Address', value: '2001:0db8:85a3:0000:0000:8a2e:0370:7334' },
-          { type: 'ASN', value: `AS${Math.floor(Math.random() * 90000 + 10000)}` },
-          { type: 'ISP', value: 'CloudFlare Inc.' },
-        ];
-
-        for (const info of networkInfo) {
-          await new Promise(resolve => setTimeout(resolve, scanSpeed));
-          sendUpdate(`${info.type}: ${info.value}`, 'info');
-        }
-
-        sendUpdate('Network scanning complete.', 'success');
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        // Port Scanning
-        sendUpdate('Starting port scanning...', 'header');
-        await new Promise(resolve => setTimeout(resolve, 300));
-        
-        const commonPorts = [
-          { port: 80, service: 'HTTP', status: 'open' },
-          { port: 443, service: 'HTTPS', status: 'open' },
-          { port: 22, service: 'SSH', status: Math.random() > 0.5 ? 'open' : 'filtered' },
-          { port: 21, service: 'FTP', status: 'closed' },
-          { port: 25, service: 'SMTP', status: Math.random() > 0.7 ? 'open' : 'closed' },
-          { port: 3306, service: 'MySQL', status: Math.random() > 0.8 ? 'open' : 'filtered' },
-          { port: 5432, service: 'PostgreSQL', status: 'filtered' },
-          { port: 8080, service: 'HTTP-Alt', status: Math.random() > 0.6 ? 'open' : 'closed' },
-        ];
-
-        const portsToScan = scanType === 'quick' ? 4 : scanType === 'detailed' ? 6 : 8;
-        const openPorts: any[] = [];
-
-        for (const portInfo of commonPorts.slice(0, portsToScan)) {
-          await new Promise(resolve => setTimeout(resolve, scanSpeed));
-          const statusType = portInfo.status === 'open' ? 'warning' : portInfo.status === 'filtered' ? 'info' : 'scan';
-          sendUpdate(`Port ${portInfo.port} (${portInfo.service}): ${portInfo.status.toUpperCase()}`, statusType);
-          if (portInfo.status === 'open') {
-            openPorts.push(portInfo);
-          }
-        }
-
-        sendUpdate(`Port scanning complete. Found ${openPorts.length} open ports.`, 'success');
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        // Security Analysis
-        if (scanType !== 'quick') {
-          sendUpdate('Performing security analysis...', 'header');
-          await new Promise(resolve => setTimeout(resolve, 300));
+          // Real Subdomain Enumeration
+          sendUpdate('Starting real subdomain enumeration via DNS...', 'header');
           
-          const vulnerabilities = [
-            'SSL/TLS certificate is valid',
-            'HSTS header detected',
-            'X-Frame-Options header present',
-            openPorts.length > 2 ? 'WARNING: Multiple open ports detected' : 'Port security acceptable',
-            foundSubdomains.length > 5 ? 'INFO: Large subdomain footprint' : 'Subdomain count normal',
+          const commonSubdomains = [
+            'www', 'mail', 'ftp', 'admin', 'webmail', 'smtp', 'pop', 'ns1', 'ns2',
+            'cpanel', 'whm', 'webdisk', 'ns', 'server', 'host', 'support', 'dev',
+            'web', 'bbs', 'ww1', 'host2', 'shop', 'forum', 'news', 'portal',
+            'api', 'app', 'mobile', 'staging', 'test', 'beta', 'demo', 'blog'
           ];
 
-          for (const vuln of vulnerabilities) {
-            await new Promise(resolve => setTimeout(resolve, scanSpeed + 100));
-            const type = vuln.includes('WARNING') ? 'warning' : vuln.includes('INFO') ? 'info' : 'success';
-            sendUpdate(vuln, type);
+          const subdomainsToCheck = scanType === 'quick' ? 8 : scanType === 'detailed' ? 20 : 32;
+          const foundSubdomains: string[] = [];
+
+          for (const sub of commonSubdomains.slice(0, subdomainsToCheck)) {
+            const fullDomain = `${sub}.${domain}`;
+            sendUpdate(`Checking ${fullDomain}...`, 'scan');
+            
+            const exists = await checkSubdomain(fullDomain);
+            
+            if (exists) {
+              foundSubdomains.push(fullDomain);
+              sendUpdate(`✓ Found: ${fullDomain}`, 'success');
+            } else {
+              sendUpdate(`✗ Not found: ${fullDomain}`, 'scan');
+            }
           }
 
-          sendUpdate('Security analysis complete.', 'success');
+          sendUpdate(`Subdomain enumeration complete. Found ${foundSubdomains.length} active subdomains.`, 'success');
           await new Promise(resolve => setTimeout(resolve, 500));
-        }
 
-        // Generate summary
-        const summary = {
-          domain,
-          scanType,
-          timestamp: new Date().toISOString(),
-          results: {
-            subdomains: foundSubdomains,
-            networkInfo,
-            openPorts,
-            totalSubdomains: foundSubdomains.length,
-            totalOpenPorts: openPorts.length,
+          // Real Network Information
+          sendUpdate('Gathering network information...', 'header');
+          
+          const ipAddresses = await getIPInfo(domain);
+          const networkInfo: any[] = [];
+          
+          if (ipAddresses.length > 0) {
+            for (const ip of ipAddresses) {
+              networkInfo.push({ type: 'IPv4 Address', value: ip });
+              sendUpdate(`IPv4 Address: ${ip}`, 'info');
+            }
+          } else {
+            sendUpdate('No DNS A records found', 'warning');
           }
-        };
 
-        sendUpdate('Scan completed successfully!', 'complete');
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'summary', data: summary })}\n\n`));
-        controller.close();
+          sendUpdate('Network scanning complete.', 'success');
+          await new Promise(resolve => setTimeout(resolve, 500));
+
+          // Real SSL/TLS and Security Analysis
+          if (scanType !== 'quick') {
+            sendUpdate('Performing real security analysis...', 'header');
+            
+            const securityResults = await checkWebSecurity(domain);
+
+            // HTTP/HTTPS Status
+            if (securityResults.httpsAccessible) {
+              sendUpdate('✓ HTTPS is accessible', 'success');
+              sendUpdate('✓ SSL/TLS certificate is valid', 'success');
+            } else {
+              sendUpdate('✗ HTTPS is not accessible or certificate invalid', 'warning');
+            }
+
+            if (securityResults.httpAccessible) {
+              if (securityResults.redirectsToHttps) {
+                sendUpdate('✓ HTTP redirects to HTTPS', 'success');
+              } else {
+                sendUpdate('⚠ HTTP does not redirect to HTTPS', 'warning');
+              }
+            }
+
+            // Security Headers Analysis
+            sendUpdate('Analyzing security headers...', 'header');
+            
+            const headers = securityResults.securityHeaders;
+            
+            if (headers['Strict-Transport-Security'] !== 'Not set') {
+              sendUpdate(`✓ HSTS: ${headers['Strict-Transport-Security']}`, 'success');
+            } else {
+              sendUpdate('✗ HSTS header missing (Strict-Transport-Security)', 'warning');
+            }
+
+            if (headers['X-Frame-Options'] !== 'Not set') {
+              sendUpdate(`✓ X-Frame-Options: ${headers['X-Frame-Options']}`, 'success');
+            } else {
+              sendUpdate('✗ X-Frame-Options header missing (Clickjacking risk)', 'warning');
+            }
+
+            if (headers['X-Content-Type-Options'] !== 'Not set') {
+              sendUpdate(`✓ X-Content-Type-Options: ${headers['X-Content-Type-Options']}`, 'success');
+            } else {
+              sendUpdate('✗ X-Content-Type-Options header missing', 'warning');
+            }
+
+            if (headers['Content-Security-Policy'] === 'Present') {
+              sendUpdate('✓ Content-Security-Policy header present', 'success');
+            } else {
+              sendUpdate('✗ Content-Security-Policy header missing (XSS risk)', 'warning');
+            }
+
+            if (headers['Referrer-Policy'] !== 'Not set') {
+              sendUpdate(`✓ Referrer-Policy: ${headers['Referrer-Policy']}`, 'success');
+            } else {
+              sendUpdate('ℹ Referrer-Policy header not set', 'info');
+            }
+
+            // Additional security checks for full scan
+            if (scanType === 'full') {
+              sendUpdate('Performing additional security checks...', 'header');
+              
+              if (foundSubdomains.length > 10) {
+                sendUpdate('⚠ Large subdomain footprint detected - increased attack surface', 'warning');
+              }
+
+              if (!securityResults.certificate.valid && securityResults.httpAccessible) {
+                sendUpdate('⚠ Site accessible via HTTP without valid HTTPS', 'warning');
+              }
+            }
+
+            sendUpdate('Security analysis complete.', 'success');
+          }
+
+          // Generate summary
+          const summary = {
+            domain,
+            scanType,
+            timestamp: new Date().toISOString(),
+            results: {
+              subdomains: foundSubdomains,
+              networkInfo,
+              totalSubdomains: foundSubdomains.length,
+              totalIPs: ipAddresses.length,
+            }
+          };
+
+          sendUpdate('✓ Real security scan completed successfully!', 'complete');
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'summary', data: summary })}\n\n`));
+          controller.close();
+        } catch (error) {
+          console.error('Scan execution error:', error);
+          sendUpdate(`Error during scan: ${error instanceof Error ? error.message : 'Unknown error'}`, 'warning');
+          controller.close();
+        }
       }
     });
 
