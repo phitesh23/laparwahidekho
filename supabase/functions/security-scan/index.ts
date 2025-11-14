@@ -29,6 +29,22 @@ async function checkSubdomain(subdomain: string): Promise<boolean> {
   }
 }
 
+// Real port scanning using TCP connections
+async function checkPort(hostname: string, port: number): Promise<boolean> {
+  try {
+    const conn = await Promise.race([
+      Deno.connect({ hostname, port, transport: "tcp" }),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('timeout')), 2000)
+      )
+    ]) as Deno.TcpConn;
+    conn.close();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Real SSL/TLS and security headers check
 async function checkWebSecurity(domain: string) {
   const results = {
@@ -178,6 +194,55 @@ serve(async (req) => {
           sendUpdate('Network scanning complete.', 'success');
           await new Promise(resolve => setTimeout(resolve, 500));
 
+          // Real Port Scanning
+          sendUpdate('Starting real port scanning...', 'header');
+          
+          const commonPorts = scanType === 'quick' 
+            ? [80, 443, 22, 21, 25] // HTTP, HTTPS, SSH, FTP, SMTP
+            : scanType === 'detailed'
+            ? [21, 22, 25, 80, 110, 143, 443, 3306, 5432, 8080, 8443] // + common services
+            : [20, 21, 22, 23, 25, 53, 80, 110, 143, 443, 465, 587, 993, 995, 
+               1433, 3306, 3389, 5432, 5900, 6379, 8080, 8443, 8888, 27017, 3000]; // comprehensive
+
+          const portNames: Record<number, string> = {
+            20: 'FTP Data', 21: 'FTP', 22: 'SSH', 23: 'Telnet', 25: 'SMTP',
+            53: 'DNS', 80: 'HTTP', 110: 'POP3', 143: 'IMAP', 443: 'HTTPS',
+            465: 'SMTPS', 587: 'SMTP', 993: 'IMAPS', 995: 'POP3S',
+            1433: 'MSSQL', 3306: 'MySQL', 3389: 'RDP', 5432: 'PostgreSQL',
+            5900: 'VNC', 6379: 'Redis', 8080: 'HTTP Alt', 8443: 'HTTPS Alt',
+            8888: 'HTTP Alt', 27017: 'MongoDB', 3000: 'Node.js'
+          };
+
+          const openPorts: Array<{port: number, service: string}> = [];
+          
+          // Get first IP address for port scanning
+          const targetIP = ipAddresses.length > 0 ? ipAddresses[0] : domain;
+          sendUpdate(`Scanning ${commonPorts.length} ports on ${targetIP}...`, 'info');
+
+          for (let i = 0; i < commonPorts.length; i++) {
+            const port = commonPorts[i];
+            const serviceName = portNames[port] || 'Unknown';
+            
+            const isOpen = await checkPort(targetIP, port);
+            
+            if (isOpen) {
+              openPorts.push({ port, service: serviceName });
+              sendUpdate(`✓ Port ${port} (${serviceName}) is OPEN`, 'success');
+            }
+            
+            // Progress update every 5 ports
+            if ((i + 1) % 5 === 0) {
+              sendUpdate(`Scanned ${i + 1}/${commonPorts.length} ports...`, 'scan');
+            }
+          }
+
+          if (openPorts.length > 0) {
+            sendUpdate(`Port scanning complete. Found ${openPorts.length} open ports.`, 'success');
+          } else {
+            sendUpdate('Port scanning complete. No open ports found (may be filtered).', 'info');
+          }
+          await new Promise(resolve => setTimeout(resolve, 500));
+
           // Real SSL/TLS and Security Analysis
           if (scanType !== 'quick') {
             sendUpdate('Performing real security analysis...', 'header');
@@ -259,8 +324,10 @@ serve(async (req) => {
             results: {
               subdomains: foundSubdomains,
               networkInfo,
+              openPorts,
               totalSubdomains: foundSubdomains.length,
               totalIPs: ipAddresses.length,
+              totalOpenPorts: openPorts.length,
             }
           };
 
