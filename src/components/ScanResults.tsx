@@ -108,18 +108,66 @@ const ScanResults = ({ messages, isScanning, scanSummary, onReset }: ScanResults
         }
         doc.setFontSize(12);
         doc.setTextColor(34, 197, 94);
-        doc.text("Open Ports:", margin, yPos);
+        doc.text("Open Ports Discovered:", margin, yPos);
         yPos += 8;
 
-        doc.setFontSize(9);
+        const portDescriptions: Record<string, string> = {
+          'FTP Data': 'File Transfer Protocol data channel - allows file transfers',
+          'FTP': 'File Transfer Protocol - allows file uploads/downloads, may expose sensitive data',
+          'SSH': 'Secure Shell - remote server access, should be secured with keys',
+          'Telnet': 'Unencrypted remote access - CRITICAL: should be disabled, use SSH instead',
+          'SMTP': 'Email sending - used for outgoing mail',
+          'DNS': 'Domain Name System - translates domain names to IP addresses',
+          'HTTP': 'Web traffic - unencrypted, should redirect to HTTPS',
+          'POP3': 'Email retrieval - consider using secure version (POP3S)',
+          'IMAP': 'Email access - consider using secure version (IMAPS)',
+          'HTTPS': 'Secure web traffic - encrypted communication',
+          'SMTPS': 'Secure email sending - encrypted SMTP',
+          'IMAPS': 'Secure email access - encrypted IMAP',
+          'POP3S': 'Secure email retrieval - encrypted POP3',
+          'MSSQL': 'Microsoft SQL Server database - should not be publicly exposed',
+          'MySQL': 'MySQL database - should not be publicly exposed',
+          'RDP': 'Remote Desktop Protocol - Windows remote access, often targeted',
+          'PostgreSQL': 'PostgreSQL database - should not be publicly exposed',
+          'VNC': 'Virtual Network Computing - remote desktop access',
+          'Redis': 'Redis database cache - should not be publicly exposed',
+          'HTTP Alt': 'Alternative HTTP port - web server or proxy',
+          'HTTPS Alt': 'Alternative HTTPS port - secure web server',
+          'MongoDB': 'MongoDB database - should not be publicly exposed',
+          'Node.js': 'Node.js application - common development port',
+          'Unknown': 'Service not identified - requires further investigation'
+        };
+
+        doc.setFontSize(8);
         doc.setTextColor(0, 0, 0);
         scanSummary.results.openPorts.forEach((port: any) => {
-          if (yPos > 270) {
+          if (yPos > 265) {
             doc.addPage();
             yPos = 20;
           }
-          doc.text(`• Port ${port.port} (${port.service}): ${port.status.toUpperCase()}`, margin + 5, yPos);
-          yPos += 6;
+          
+          const description = portDescriptions[port.service] || 'Service usage unknown';
+          const portInfo = `• Port ${port.port} - ${port.service}`;
+          const portDesc = `  ${description}`;
+          
+          doc.setFont(undefined, 'bold');
+          doc.text(portInfo, margin + 5, yPos);
+          yPos += 5;
+          
+          doc.setFont(undefined, 'normal');
+          doc.setTextColor(60, 60, 60);
+          const descLines = doc.splitTextToSize(portDesc, pageWidth - 2 * margin - 10);
+          descLines.forEach((line: string) => {
+            if (yPos > 275) {
+              doc.addPage();
+              yPos = 20;
+            }
+            doc.text(line, margin + 5, yPos);
+            yPos += 4;
+          });
+          
+          doc.setTextColor(0, 0, 0);
+          yPos += 3;
         });
       }
     }
