@@ -138,7 +138,7 @@ const ScanResults = ({ messages, isScanning, scanSummary, onReset }: ScanResults
           'Unknown': 'Service not identified - requires further investigation'
         };
 
-        doc.setFontSize(8);
+        doc.setFontSize(9);
         doc.setTextColor(0, 0, 0);
         scanSummary.results.openPorts.forEach((port: any) => {
           if (yPos > 265) {
@@ -147,27 +147,29 @@ const ScanResults = ({ messages, isScanning, scanSummary, onReset }: ScanResults
           }
           
           const description = portDescriptions[port.service] || 'Service usage unknown';
-          const portInfo = `• Port ${port.port} - ${port.service}`;
-          const portDesc = `  ${description}`;
           
-          doc.setFont(undefined, 'bold');
-          doc.text(portInfo, margin + 5, yPos);
-          yPos += 5;
+          // Port header line
+          const portHeader = `Port ${port.port} - ${port.service}`;
+          doc.text(portHeader, margin + 5, yPos);
+          yPos += 6;
           
-          doc.setFont(undefined, 'normal');
-          doc.setTextColor(60, 60, 60);
-          const descLines = doc.splitTextToSize(portDesc, pageWidth - 2 * margin - 10);
+          // Description with proper text wrapping
+          doc.setFontSize(8);
+          doc.setTextColor(80, 80, 80);
+          const descLines = doc.splitTextToSize(description, pageWidth - 2 * margin - 10);
           descLines.forEach((line: string) => {
             if (yPos > 275) {
               doc.addPage();
               yPos = 20;
             }
-            doc.text(line, margin + 5, yPos);
-            yPos += 4;
+            doc.text(line, margin + 10, yPos);
+            yPos += 5;
           });
           
+          // Reset for next port
+          doc.setFontSize(9);
           doc.setTextColor(0, 0, 0);
-          yPos += 3;
+          yPos += 4;
         });
       }
     }
