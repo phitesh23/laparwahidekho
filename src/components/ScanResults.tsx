@@ -3,6 +3,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Download, Terminal } from "lucide-react";
 import jsPDF from "jspdf";
+import AISecurityReport from "./AISecurityReport";
 
 interface ScanMessage {
   message: string;
@@ -262,6 +263,9 @@ const ScanResults = ({ messages, isScanning, scanSummary, onReset }: ScanResults
         </div>
       </Card>
 
+      {scanSummary && !isScanning && (
+        <AISecurityReport scanSummary={scanSummary} />
+      )}
       <style>{`
         .custom-scrollbar::-webkit-scrollbar {
           width: 8px;
