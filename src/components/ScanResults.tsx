@@ -263,6 +263,9 @@ const ScanResults = ({ messages, isScanning, scanSummary, onReset }: ScanResults
         </div>
       </Card>
 
+      {scanSummary && !isScanning && (
+        <AISecurityReport scanSummary={scanSummary} />
+      )}
       <style>{`
         .custom-scrollbar::-webkit-scrollbar {
           width: 8px;
