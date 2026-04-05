@@ -3,6 +3,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Download, Terminal } from "lucide-react";
 import jsPDF from "jspdf";
+import AISecurityReport from "./AISecurityReport";
 
 interface ScanMessage {
   message: string;
