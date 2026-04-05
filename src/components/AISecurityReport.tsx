@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Brain, Loader2 } from "lucide-react";
@@ -8,13 +8,20 @@ import { useToast } from "@/hooks/use-toast";
 
 interface AISecurityReportProps {
   scanSummary: any;
+  onReportGenerated?: (reportText: string) => void;
 }
 
-const AISecurityReport = ({ scanSummary }: AISecurityReportProps) => {
+const AISecurityReport = ({ scanSummary, onReportGenerated }: AISecurityReportProps) => {
   const [report, setReport] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [hasGenerated, setHasGenerated] = useState(false);
   const { toast } = useToast();
+
+  useEffect(() => {
+    if (hasGenerated && report && onReportGenerated) {
+      onReportGenerated(report);
+    }
+  }, [hasGenerated, report, onReportGenerated]);
 
   const generateReport = async () => {
     setIsGenerating(true);
