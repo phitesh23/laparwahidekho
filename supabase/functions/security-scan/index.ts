@@ -253,7 +253,18 @@ serve(async (req) => {
           // ── DNS Reconnaissance ──
           sendUpdate('═══ DNS Reconnaissance ═══', 'header');
           const dnsRecords = await getDNSRecords(domain);
-          const allIPs: string[] = [...dnsRecords.A];
+          const rawIPs: string[] = [...dnsRecords.A];
+          const allIPs: string[] = filterPrivateIPs(rawIPs);
+
+          // SSRF protection: reject if all resolved IPs are private
+          if (rawIPs.length > 0 && allIPs.length === 0) {
+            sendUpdate('✗ Scan rejected: domain resolves to private/reserved IP addresses.', 'error');
+            controller.close();
+            return;
+          }
+          if (rawIPs.length !== allIPs.length) {
+            sendUpdate(`⚠ Filtered ${rawIPs.length - allIPs.length} private IP(s) from results.`, 'warning');
+          }
 
           if (dnsRecords.A.length > 0) {
             dnsRecords.A.forEach((ip: string) => sendUpdate(`A Record: ${ip}`, 'info'));
