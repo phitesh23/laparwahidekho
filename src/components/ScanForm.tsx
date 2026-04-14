@@ -77,8 +77,8 @@ const ScanForm = ({ onStartScan, isScanning }: ScanFormProps) => {
   return (
     <div className="w-full max-w-4xl mx-auto space-y-6">
       <div className="text-center space-y-2">
-        <h1 className="text-5xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
-          HAAutomation
+        <h1 className="text-5xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent border-secondary bg-destructive-foreground">
+          Automated Vulnerability Scanner
         </h1>
         <p className="text-lg text-muted-foreground">
           Advanced Security Scanning Platform
