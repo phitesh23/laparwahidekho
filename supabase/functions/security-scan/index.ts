@@ -309,8 +309,13 @@ serve(async (req) => {
             sendUpdate(`Probing ${fullDomain}...`, 'scan');
             const result = await checkSubdomain(fullDomain);
             if (result.exists) {
-              foundSubdomains.push({ subdomain: fullDomain, ips: result.ips });
-              sendUpdate(`✓ FOUND: ${fullDomain} → ${result.ips.join(', ')}`, 'success');
+              const safeIPs = filterPrivateIPs(result.ips);
+              if (safeIPs.length > 0) {
+                foundSubdomains.push({ subdomain: fullDomain, ips: safeIPs });
+                sendUpdate(`✓ FOUND: ${fullDomain} → ${safeIPs.join(', ')}`, 'success');
+              } else {
+                sendUpdate(`⚠ Skipped ${fullDomain}: resolves to private IP`, 'warning');
+              }
             }
           }
 
