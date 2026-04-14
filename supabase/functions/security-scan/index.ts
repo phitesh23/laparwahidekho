@@ -5,6 +5,45 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// --- Private IP validation to prevent SSRF ---
+function isPrivateIP(ip: string): boolean {
+  // IPv4 private/reserved ranges
+  const parts = ip.split('.').map(Number);
+  if (parts.length === 4 && parts.every(p => p >= 0 && p <= 255)) {
+    if (parts[0] === 10) return true; // 10.0.0.0/8
+    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true; // 172.16.0.0/12
+    if (parts[0] === 192 && parts[1] === 168) return true; // 192.168.0.0/16
+    if (parts[0] === 127) return true; // 127.0.0.0/8
+    if (parts[0] === 169 && parts[1] === 254) return true; // 169.254.0.0/16
+    if (parts[0] === 0) return true; // 0.0.0.0/8
+    if (parts[0] >= 224) return true; // multicast + reserved
+  }
+  // IPv6 loopback and private
+  if (ip === '::1' || ip.startsWith('fc') || ip.startsWith('fd') || ip.startsWith('fe80')) return true;
+  return false;
+}
+
+function filterPrivateIPs(ips: string[]): string[] {
+  return ips.filter(ip => !isPrivateIP(ip));
+}
+
+// --- In-memory rate limiting ---
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+const RATE_LIMIT = 5; // max scans per window
+const RATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+
+function checkRateLimit(clientIP: string): boolean {
+  const now = Date.now();
+  const entry = rateLimitMap.get(clientIP);
+  if (!entry || now > entry.resetAt) {
+    rateLimitMap.set(clientIP, { count: 1, resetAt: now + RATE_WINDOW_MS });
+    return true;
+  }
+  if (entry.count >= RATE_LIMIT) return false;
+  entry.count++;
+  return true;
+}
+
 function extractDomain(input: string): string {
   try {
     const url = new URL(input.startsWith('http') ? input : `https://${input}`);
@@ -176,6 +215,16 @@ serve(async (req) => {
   }
 
   try {
+    // Rate limiting by client IP
+    const clientIP = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 
+                     req.headers.get('cf-connecting-ip') || 'unknown';
+    if (!checkRateLimit(clientIP)) {
+      return new Response(
+        JSON.stringify({ error: 'Rate limit exceeded. Maximum 5 scans per hour.' }),
+        { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     const { domain: rawDomain, scanType } = await req.json();
     const domain = extractDomain(rawDomain);
 
@@ -204,7 +253,18 @@ serve(async (req) => {
           // ── DNS Reconnaissance ──
           sendUpdate('═══ DNS Reconnaissance ═══', 'header');
           const dnsRecords = await getDNSRecords(domain);
-          const allIPs: string[] = [...dnsRecords.A];
+          const rawIPs: string[] = [...dnsRecords.A];
+          const allIPs: string[] = filterPrivateIPs(rawIPs);
+
+          // SSRF protection: reject if all resolved IPs are private
+          if (rawIPs.length > 0 && allIPs.length === 0) {
+            sendUpdate('✗ Scan rejected: domain resolves to private/reserved IP addresses.', 'error');
+            controller.close();
+            return;
+          }
+          if (rawIPs.length !== allIPs.length) {
+            sendUpdate(`⚠ Filtered ${rawIPs.length - allIPs.length} private IP(s) from results.`, 'warning');
+          }
 
           if (dnsRecords.A.length > 0) {
             dnsRecords.A.forEach((ip: string) => sendUpdate(`A Record: ${ip}`, 'info'));
@@ -249,8 +309,13 @@ serve(async (req) => {
             sendUpdate(`Probing ${fullDomain}...`, 'scan');
             const result = await checkSubdomain(fullDomain);
             if (result.exists) {
-              foundSubdomains.push({ subdomain: fullDomain, ips: result.ips });
-              sendUpdate(`✓ FOUND: ${fullDomain} → ${result.ips.join(', ')}`, 'success');
+              const safeIPs = filterPrivateIPs(result.ips);
+              if (safeIPs.length > 0) {
+                foundSubdomains.push({ subdomain: fullDomain, ips: safeIPs });
+                sendUpdate(`✓ FOUND: ${fullDomain} → ${safeIPs.join(', ')}`, 'success');
+              } else {
+                sendUpdate(`⚠ Skipped ${fullDomain}: resolves to private IP`, 'warning');
+              }
             }
           }
 
