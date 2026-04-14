@@ -215,6 +215,16 @@ serve(async (req) => {
   }
 
   try {
+    // Rate limiting by client IP
+    const clientIP = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 
+                     req.headers.get('cf-connecting-ip') || 'unknown';
+    if (!checkRateLimit(clientIP)) {
+      return new Response(
+        JSON.stringify({ error: 'Rate limit exceeded. Maximum 5 scans per hour.' }),
+        { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     const { domain: rawDomain, scanType } = await req.json();
     const domain = extractDomain(rawDomain);
 
